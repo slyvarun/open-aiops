@@ -3,6 +3,7 @@
 import asyncio
 import pytest
 from examples.run_demo import create_demo_router, execute_request_with_failover, run_demo
+from open_aiops.governance.retry import RetryPolicy
 from open_aiops.governance.router import RouteRequest
 
 
@@ -38,6 +39,7 @@ def test_execute_request_with_automated_failover():
             req,
             simulated_output_tokens=30,
             failing_providers={"local-economy"},
+            retry_policy=RetryPolicy(max_attempts=1),
         )
     )
 
@@ -46,7 +48,7 @@ def test_execute_request_with_automated_failover():
     # Fallback to cloud-primary
     assert result["result"]["provider"] == "cloud-primary"
     assert len(result["attempts"]) == 2
-    assert "429" in result["attempts"][0]["status"]
+    assert "429" in result["attempts"][0]["status"] or "RateLimitError" in result["attempts"][0]["status"]
     assert "200" in result["attempts"][1]["status"]
 
 
@@ -60,6 +62,7 @@ def test_execute_request_all_providers_fail():
             req,
             simulated_output_tokens=30,
             failing_providers={"local-economy", "cloud-primary", "cloud-fallback"},
+            retry_policy=RetryPolicy(max_attempts=1),
         )
     )
 
@@ -72,5 +75,6 @@ def test_run_demo_executes_successfully():
     summary = run_demo()
     assert summary["status"] == "success"
     assert summary["requests_processed"] == 3
-    assert summary["spans_recorded"] == 4  # 1 for agent A, 1 for agent B, 2 for agent C (1 fail + 1 success)
+    assert summary["spans_recorded"] == 9  # 3 request spans + 6 attempt spans (1 + 1 + 3 retries + 1 fallback)
     assert summary["total_tokens"] > 0
+    assert summary["total_cost"] > 0
